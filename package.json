@@ -9,7 +9,7 @@
     "build": "tsc",
     "build-weather": "tsc ./src/weatherSDK.ts -o  ./dist/weatherSDK.js",
     "dev": "nodemon ./dist/index.js",
-    "start": "node ./dist/index.js"
+    "start": "nodemon ./dist/index.js"
   },
   "keywords": [],
   "author": "",

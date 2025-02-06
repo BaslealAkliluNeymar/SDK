@@ -10,36 +10,55 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 import axios from 'axios';
 import 'dotenv/config';
 import NodeCache from 'node-cache';
+import { createClient } from 'redis';
 export class WeatherSDK {
     constructor(api_key) {
         this.api_key = api_key;
+        this.redisClient = createClient({
+            url: 'redis://default:BfRMGtpyUzLi6Krp45cMw0VhUmgJAUSo@redis-14945.c84.us-east-1-2.ec2.redns.redis-cloud.com:14945'
+        });
         this.WeatherCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
+        this.redisClient.on('error', (error) => {
+            console.error(error);
+        });
+        this.redisClient.on('connect', () => {
+            console.log('Connected to Redis Server');
+        });
+        this.redisClient.connect().then(() => (console.log('Succesfully Connected')));
     }
-    getCacheKey(city, suffix = '') {
-        return `weather_${city.trim().replace(/\s+/g, '_').toLowerCase()}${suffix}`;
+    CacheKeyMiddleWare(city) {
+        return `weather_${city.trim().replace(' ', '_').toLowerCase()}`;
     }
     getCurrentWeatherByLocation(city) {
         return __awaiter(this, void 0, void 0, function* () {
-            const cacheKey = this.getCacheKey(city);
-            const cachedData = this.WeatherCache.get(cacheKey);
-            if (cachedData) {
-                console.log('Data from Cache');
-                return { data: cachedData, source: 'cache' };
-            }
             try {
-                const geoResponse = yield axios.get('http://api.openweathermap.org/geo/1.0/direct', {
-                    params: { q: city, limit: 1, appid: this.api_key }
-                });
-                if (!geoResponse.data || geoResponse.data.length === 0)
-                    throw new Error('Please Enter a Correct Country Name!');
-                const { lat, lon } = geoResponse.data[0];
-                const weatherResponse = yield axios.get(WeatherSDK.URL, {
-                    params: { lat, lon, appid: this.api_key }
-                });
-                const weatherData = weatherResponse.data;
-                this.WeatherCache.set(cacheKey, weatherData);
-                console.log('Data from API');
-                return { data: weatherData, source: 'api' };
+                const cacheKey = this.CacheKeyMiddleWare(city);
+                const cachedData = yield this.redisClient.get(cacheKey);
+                console.log(yield this.redisClient.get(cacheKey));
+                if (!cachedData) {
+                    const findCountryCoordinates = yield axios.get('http://api.openweathermap.org/geo/1.0/direct', { params: {
+                            q: city,
+                            limit: 1,
+                            appid: this.api_key
+                        } });
+                    if (!findCountryCoordinates.data || findCountryCoordinates.data.length === 0) {
+                        throw new Error('Please Enter a Correct Country Name!');
+                    }
+                    const data = yield axios.get(WeatherSDK.URL, {
+                        params: {
+                            lat: findCountryCoordinates.data[0].lat,
+                            lon: findCountryCoordinates.data[0].lon,
+                            appid: this.api_key
+                        }
+                    });
+                    yield this.redisClient.set(cacheKey, JSON.stringify(data.data));
+                    console.log('Data from API');
+                    console.log(data.data);
+                    return data.data;
+                }
+                console.log('Data from Cache');
+                console.log(cachedData);
+                return cachedData;
             }
             catch (error) {
                 console.error(error);
@@ -48,33 +67,32 @@ export class WeatherSDK {
         });
     }
     getWeatherForecast(city) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const cacheKey = this.getCacheKey(city, '_forecast');
-            const cachedData = this.WeatherCache.get(cacheKey);
-            if (cachedData) {
-                console.log('Data from Cache');
-                return cachedData;
-            }
-            try {
-                const geoResponse = yield axios.get('http://api.openweathermap.org/geo/1.0/direct', {
-                    params: { q: city, limit: 1, appid: this.api_key }
-                });
-                if (!geoResponse.data || geoResponse.data.length === 0)
+        try {
+            return axios.get('http://api.openweathermap.org/geo/1.0/direct', { params: {
+                    q: city,
+                    limit: 1,
+                    appid: this.api_key
+                } })
+                .then((response) => {
+                if (!response) {
                     throw new Error('Please Enter the Correct Country Name');
-                const { lat, lon } = geoResponse.data[0];
-                const forecastResponse = yield axios.get(WeatherSDK.HourlyURL, {
-                    params: { lat, lon, appid: this.api_key }
+                }
+                const { lat, lon } = response.data[0];
+                return axios.get(WeatherSDK.HourlyURL, {
+                    params: {
+                        lat: lat,
+                        lon: lon,
+                        appid: this.api_key
+                    }
                 });
-                const forecastData = forecastResponse.data;
-                this.WeatherCache.set(cacheKey, forecastData);
-                console.log('Data from API');
-                return forecastData;
-            }
-            catch (error) {
-                console.error(error);
-                return 'Failed to Fetch Weather Data, Please Try Again Later!';
-            }
-        });
+            })
+                .then((weatherResponse) => {
+                return weatherResponse.data;
+            });
+        }
+        catch (error) {
+            return 'Failed to Fetch Weather Date, Please Try Again Later!';
+        }
     }
 }
 WeatherSDK.URL = 'https://api.openweathermap.org/data/2.5/weather';

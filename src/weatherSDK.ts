@@ -12,10 +12,6 @@ export class WeatherSDK {
       });   
 
     constructor(private api_key:string){
-        const openai = new OpenAI({
-            baseURL: 'https://api.deepseek.com',
-            apiKey: process.env.DEEP_WEATHER
-        });
         this.redisClient.on('error', (error) => {
             console.error(error)
         })

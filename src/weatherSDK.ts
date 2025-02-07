@@ -1,19 +1,21 @@
 import axios from 'axios';
 import 'dotenv/config';
-import NodeCache from 'node-cache';
 import { WeatherResponse } from './types.js';
 import { createClient } from 'redis';
+import OpenAI from "openai";
+
 export class WeatherSDK {
     private static URL:string = 'https://api.openweathermap.org/data/2.5/weather'
     private static HourlyURL:string = 'https://api.openweathermap.org/data/2.5/forecast'
-    private WeatherCache:NodeCache;
     private redisClient = createClient({
         url: process.env.REDIS_URL
       });   
 
     constructor(private api_key:string){
-        this.WeatherCache = new NodeCache({ stdTTL:600,checkperiod:120}) 
-
+        const openai = new OpenAI({
+            baseURL: 'https://api.deepseek.com',
+            apiKey: process.env.DEEP_WEATHER
+        });
         this.redisClient.on('error', (error) => {
             console.error(error)
         })
@@ -27,6 +29,16 @@ export class WeatherSDK {
         ))
     }
     
+    async fetchCity(city:string):Promise<any | object>{ 
+        return await axios.get(
+            'http://api.openweathermap.org/geo/1.0/direct',
+                { params:{
+                    q:city,
+                    limit:1,
+                    appid:this.api_key
+                }}
+            )
+    }
 
     CacheKeyMiddleWare(city:string):string{
         return `weather_${city.trim().replace(' ', '_').toLowerCase()}`
@@ -35,25 +47,12 @@ export class WeatherSDK {
         try
             {                  
                 const cacheKey: string = this.CacheKeyMiddleWare(city);
-               
                 const cachedData =await this.redisClient.get(cacheKey);
-                console.log(await this.redisClient.get(cacheKey))
                 if(!cachedData){
-                    const findCountryCoordinates  = await axios.get(
-                        'http://api.openweathermap.org/geo/1.0/direct',
-                            { params:{
-                                q:city,
-                                limit:1,
-                                appid:this.api_key
-                            }}
-                        )
-
-
+                    const findCountryCoordinates  = await this.fetchCity(city)
                     if (!findCountryCoordinates.data || findCountryCoordinates.data.length === 0){
                         throw new Error('Please Enter a Correct Country Name!')
                     }
-
-
                     const data = await axios.get(WeatherSDK.URL, {
                         params:{
                             lat:findCountryCoordinates.data[0].lat,
@@ -61,21 +60,13 @@ export class WeatherSDK {
                             appid:this.api_key
                         }
                     })
-
-
                     await this.redisClient.set(cacheKey, JSON.stringify(data.data));
-                    console.log('Data from API');
-                    console.log(data.data)
                     return data.data;
                 }
-            
-                console.log('Data from Cache');
-                console.log(cachedData)
                 return cachedData;
                 
             }
             catch (error) {
-                console.error(error);
                 return 'Error fetching weather data';
         }
     }
@@ -84,14 +75,7 @@ export class WeatherSDK {
     getWeatherForecast(city: string){
         try
             {
-                return axios.get(
-                    'http://api.openweathermap.org/geo/1.0/direct',
-                       { params:{
-                            q:city,
-                            limit:1,
-                            appid:this.api_key
-                        }}
-                    )
+                return this.fetchCity(city)
                     .then((response) => {
                         if(!response){
                             throw new Error('Please Enter the Correct Country Name')
@@ -116,6 +100,43 @@ export class WeatherSDK {
         }
     }
 
+
+    async getForcast(city: string,days:number){
+        const forcastURL = 'http://api.weatherapi.com/v1/forecast.json'
+
+
+        const onCall = await axios.get(
+            forcastURL,
+                { params:{
+                    key:'6de7e941a5df45f18e3135757250702',
+                    q:city,
+                    days:days,
+                    api:'no',
+                    alerts:'no'
+                }}
+            )
+        return onCall.data;
+    }
+
+
+
+     async getLocation(): Promise<{ lat: number; lon: number }> {
+        try
+        {
+        const response = await axios.get("http://ip-api.com/json/");
+        const data = await axios.get(WeatherSDK.URL, {
+            params:{
+                lat:response.data.lat,
+                lon:response.data.lon,
+                appid:this.api_key
+            }
+        })
+            return data.data
+        } 
+        catch (error) {
+            throw new Error("Unable to fetch location");
+        }
+    }
 }
 
 
